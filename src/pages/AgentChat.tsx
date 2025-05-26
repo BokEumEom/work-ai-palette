@@ -4,10 +4,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Bot, User, Send, ArrowLeft, Settings } from "lucide-react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Bot, User, Send, ArrowLeft, Settings, Trash2 } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
 import { GeminiService } from "@/services/geminiApi";
 import { useToast } from "@/hooks/use-toast";
+import { ApiKeyManager } from "@/utils/apiKeyManager";
+import { AgentManager, AgentData } from "@/utils/agentManager";
+import { PromptGenerator } from "@/utils/promptGenerator";
 
 interface Message {
   id: string;
@@ -17,51 +20,74 @@ interface Message {
 }
 
 const AgentChat = () => {
-  const [searchParams] = useSearchParams();
   const { toast } = useToast();
+  const navigate = useNavigate();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [apiKey, setApiKey] = useState("");
   const [geminiService, setGeminiService] = useState<GeminiService | null>(null);
-  const [showApiKeyInput, setShowApiKeyInput] = useState(true);
+  const [showApiKeyInput, setShowApiKeyInput] = useState(false);
+  const [currentAgent, setCurrentAgent] = useState<AgentData | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Mock agent data - 실제로는 URL params나 localStorage에서 가져올 수 있음
-  const agentData = {
-    name: "마케팅 보고서 도우미",
-    purpose: "캠페인 성과 분석 및 보고서 자동 생성",
-    targetUser: "마케팅 담당자",
-    tone: "professional"
-  };
+  useEffect(() => {
+    // 현재 에이전트 로드
+    const agent = AgentManager.getCurrentAgent();
+    if (!agent) {
+      navigate('/create-agent');
+      return;
+    }
+    setCurrentAgent(agent);
+
+    // 저장된 API 키 확인
+    const savedApiKey = ApiKeyManager.getApiKey();
+    if (savedApiKey) {
+      const service = new GeminiService(savedApiKey);
+      setGeminiService(service);
+      
+      // 환영 메시지 추가
+      const welcomeMessage: Message = {
+        id: Date.now().toString(),
+        type: 'agent',
+        content: `안녕하세요! 저는 ${agent.name}입니다. ${agent.purpose}를 도와드릴 수 있어요. 무엇을 도와드릴까요?`,
+        timestamp: new Date()
+      };
+      setMessages([welcomeMessage]);
+    } else {
+      setShowApiKeyInput(true);
+    }
+  }, [navigate]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   const handleApiKeySubmit = () => {
-    if (!apiKey.trim()) {
+    if (!ApiKeyManager.validateApiKey(apiKey)) {
       toast({
-        title: "API 키 필요",
-        description: "Gemini API 키를 입력해주세요.",
+        title: "잘못된 API 키",
+        description: "유효한 Gemini API 키를 입력해주세요. (AIza로 시작해야 합니다)",
         variant: "destructive",
       });
       return;
     }
 
     try {
+      ApiKeyManager.saveApiKey(apiKey);
       const service = new GeminiService(apiKey);
       setGeminiService(service);
       setShowApiKeyInput(false);
       
-      // 환영 메시지 추가
-      const welcomeMessage: Message = {
-        id: Date.now().toString(),
-        type: 'agent',
-        content: `안녕하세요! 저는 ${agentData.name}입니다. ${agentData.purpose}를 도와드릴 수 있어요. 무엇을 도와드릴까요?`,
-        timestamp: new Date()
-      };
-      setMessages([welcomeMessage]);
+      if (currentAgent) {
+        const welcomeMessage: Message = {
+          id: Date.now().toString(),
+          type: 'agent',
+          content: `안녕하세요! 저는 ${currentAgent.name}입니다. ${currentAgent.purpose}를 도와드릴 수 있어요. 무엇을 도와드릴까요?`,
+          timestamp: new Date()
+        };
+        setMessages([welcomeMessage]);
+      }
 
       toast({
         title: "연결 완료",
@@ -77,7 +103,7 @@ const AgentChat = () => {
   };
 
   const handleSendMessage = async () => {
-    if (!input.trim() || !geminiService || isLoading) return;
+    if (!input.trim() || !geminiService || isLoading || !currentAgent) return;
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -91,7 +117,8 @@ const AgentChat = () => {
     setIsLoading(true);
 
     try {
-      const response = await geminiService.generateResponse(input.trim(), agentData);
+      const systemPrompt = PromptGenerator.generateSystemPrompt(currentAgent);
+      const response = await geminiService.generateResponse(input.trim(), { systemPrompt });
       
       const agentMessage: Message = {
         id: (Date.now() + 1).toString(),
@@ -105,11 +132,35 @@ const AgentChat = () => {
       console.error('메시지 전송 오류:', error);
       toast({
         title: "오류 발생",
-        description: "메시지 전송에 실패했습니다. API 키를 확인해주세요.",
+        description: "메시지 전송에 실패했습니다. 다시 시도해주세요.",
         variant: "destructive",
       });
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleResetApiKey = () => {
+    ApiKeyManager.removeApiKey();
+    setGeminiService(null);
+    setShowApiKeyInput(true);
+    setMessages([]);
+    toast({
+      title: "API 키 삭제",
+      description: "API 키가 삭제되었습니다.",
+    });
+  };
+
+  const handleClearChat = () => {
+    setMessages([]);
+    if (currentAgent) {
+      const welcomeMessage: Message = {
+        id: Date.now().toString(),
+        type: 'agent',
+        content: `안녕하세요! 저는 ${currentAgent.name}입니다. ${currentAgent.purpose}를 도와드릴 수 있어요. 무엇을 도와드릴까요?`,
+        timestamp: new Date()
+      };
+      setMessages([welcomeMessage]);
     }
   };
 
@@ -146,13 +197,16 @@ const AgentChat = () => {
               <CardHeader className="text-center">
                 <CardTitle className="text-2xl mb-2">API 키 설정</CardTitle>
                 <p className="text-gray-600">Gemini API 키를 입력하여 AI 에이전트를 활성화하세요</p>
+                <p className="text-sm text-amber-600 bg-amber-50 p-2 rounded-lg mt-2">
+                  API 키는 안전하게 브라우저에 저장되며 한 번만 입력하면 됩니다.
+                </p>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium mb-2">Gemini API Key</label>
                   <Input
                     type="password"
-                    placeholder="AIza..."
+                    placeholder="AIza로 시작하는 API 키를 입력하세요"
                     value={apiKey}
                     onChange={(e) => setApiKey(e.target.value)}
                     onKeyPress={handleKeyPress}
@@ -174,6 +228,10 @@ const AgentChat = () => {
     );
   }
 
+  if (!currentAgent) {
+    return <div>에이전트를 불러오는 중...</div>;
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-orange-50">
       <header className="container mx-auto px-4 py-6 flex justify-between items-center">
@@ -181,14 +239,22 @@ const AgentChat = () => {
           <Bot className="h-8 w-8 text-blue-600" />
           <span className="text-2xl font-bold text-gray-900">AgentMe</span>
         </Link>
-        <div className="flex items-center space-x-4">
+        <div className="flex items-center space-x-2">
           <Button 
             variant="outline" 
             size="sm"
-            onClick={() => setShowApiKeyInput(true)}
+            onClick={handleClearChat}
+          >
+            <Trash2 className="h-4 w-4 mr-2" />
+            대화 초기화
+          </Button>
+          <Button 
+            variant="outline" 
+            size="sm"
+            onClick={handleResetApiKey}
           >
             <Settings className="h-4 w-4 mr-2" />
-            API 설정
+            API 재설정
           </Button>
           <Link to="/create-agent">
             <Button variant="outline">
@@ -202,13 +268,19 @@ const AgentChat = () => {
       <div className="container mx-auto px-4 py-8 max-w-4xl">
         <Card className="h-[600px] flex flex-col shadow-lg">
           <CardHeader className="border-b">
-            <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center">
-                <Bot className="h-6 w-6 text-white" />
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center">
+                  <Bot className="h-6 w-6 text-white" />
+                </div>
+                <div>
+                  <CardTitle className="text-xl">{currentAgent.name}</CardTitle>
+                  <p className="text-sm text-gray-600">{currentAgent.purpose}</p>
+                </div>
               </div>
-              <div>
-                <CardTitle className="text-xl">{agentData.name}</CardTitle>
-                <p className="text-sm text-gray-600">{agentData.purpose}</p>
+              <div className="text-xs text-gray-500">
+                <div>대상: {currentAgent.targetUser}</div>
+                <div>분야: {currentAgent.industry}</div>
               </div>
             </div>
           </CardHeader>
