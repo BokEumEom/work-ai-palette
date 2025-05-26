@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -6,10 +5,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Bot, ArrowLeft, ArrowRight, CheckCircle } from "lucide-react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useSearchParams, useNavigate } from "react-router-dom";
+import { useToast } from "@/hooks/use-toast";
 
 const CreateAgent = () => {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const { toast } = useToast();
   const jobType = searchParams.get('job') || 'custom';
   const [currentStep, setCurrentStep] = useState(1);
   const [agentData, setAgentData] = useState({
@@ -109,8 +111,16 @@ const CreateAgent = () => {
   };
 
   const handleComplete = () => {
-    // 완료 로직 - 실제로는 에이전트 생성 API 호출
-    alert('에이전트가 성공적으로 생성되었습니다!');
+    // 에이전트 데이터를 localStorage에 저장 (실제로는 데이터베이스에 저장)
+    localStorage.setItem('currentAgent', JSON.stringify(agentData));
+    
+    toast({
+      title: "에이전트 생성 완료!",
+      description: `${agentData.name}이(가) 성공적으로 생성되었습니다.`,
+    });
+
+    // 챗 페이지로 이동
+    navigate('/chat');
   };
 
   return (
