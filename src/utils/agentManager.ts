@@ -33,8 +33,12 @@ export class AgentManager {
     return stored ? JSON.parse(stored) : [];
   }
 
-  static setCurrentAgent(agent: AgentData): void {
-    localStorage.setItem(this.CURRENT_AGENT_KEY, JSON.stringify(agent));
+  static setCurrentAgent(agent: AgentData | null): void {
+    if (agent) {
+      localStorage.setItem(this.CURRENT_AGENT_KEY, JSON.stringify(agent));
+    } else {
+      localStorage.removeItem(this.CURRENT_AGENT_KEY);
+    }
   }
 
   static getCurrentAgent(): AgentData | null {
@@ -45,5 +49,7 @@ export class AgentManager {
   static deleteAgent(id: string): void {
     const agents = this.getAllAgents().filter(agent => agent.id !== id);
     localStorage.setItem(this.STORAGE_KEY, JSON.stringify(agents));
+    // current agent 관리도 별도 수행 (component에서 처리)
   }
 }
+
